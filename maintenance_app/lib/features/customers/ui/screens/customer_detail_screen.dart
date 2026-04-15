@@ -609,16 +609,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
 
             serverSaysHasLocation = taskLocData['has_location'] == true;
-            if (serverSaysHasLocation && !resolved.hasAnyLocation) {
-
-              resolved = (
-                manualLink: resolved.manualLink,
-                googleLink: resolved.googleLink,
-                custLat:    resolved.custLat,
-                custLng:    resolved.custLng,
-                hasAnyLocation: true,
-              );
-            }
 
             final rm = taskLocData['restriction_m'];
             if (rm != null && rm != false) {
@@ -635,17 +625,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
     }
 
-
-    if (!serverSaysHasLocation && !resolved.hasAnyLocation) {
-      debugPrint('[StartVisit] endpoint missing or no data → forcing hasAnyLocation=true');
-      resolved = (
-        manualLink: resolved.manualLink,
-        googleLink: resolved.googleLink,
-        custLat:    resolved.custLat,
-        custLng:    resolved.custLng,
-        hasAnyLocation: true,
-      );
-    }
 
     if (!mounted) return;
     await _showLocationDistanceSheet(
@@ -730,7 +709,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
     final bool canStart;
     String?    blockReason;
-
     final hasLinkOnly = custLat == null &&
         (manualLink.isNotEmpty || googleLink.isNotEmpty);
 
@@ -738,9 +716,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       canStart    = false;
       blockReason = 'No location is set for this customer.\nPlease ask the admin to add a GPS location or map link before starting.';
     } else if (hasLinkOnly) {
-
       canStart    = true;
       blockReason = null;
+    } else if (custLat == null || custLng == null) {
+      canStart    = false;
+      blockReason = 'Customer location is not readable. Please check latitude/longitude or manual map link.';
     } else if (distMetres != null) {
       canStart = distMetres <= _kThreshold;
       if (!canStart) {
@@ -1251,4 +1231,3 @@ class _WhatsAppIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(_WhatsAppIconPainter old) => old.color != color;
 }
-
