@@ -993,35 +993,16 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       return;
     }
 
-    // ── Has manual link but coords not parseable → proceed with bypass ──
-    // The partner has a manually-set Google Maps link so we trust it.
-    // We cannot GPS-verify without extractable coords, so we bypass the
-    // location gate and show a warning with an Open-in-Maps button so the
-    // technician can still navigate.  This covers short URLs, place/ links,
-    // and any other URL where lat/lng cannot be parsed from the URL itself.
+    // ── Has link but no parseable coordinates → block ───────────────────
+    // Business rule: start/complete must be geofence-validated against
+    // customer latitude/longitude and restriction_m, so manual links alone
+    // are not enough for action execution.
     if (custLat == null) {
       _showCompleteLocationWarning(
-        title: l.t('location_coords_missing_title'),
-        message: l.t('location_coords_missing_body'),
+        title: 'Customer Coordinates Required',
+        message: 'Customer location must include valid latitude/longitude so distance can be validated before starting or completing the task.',
         customerLat: null, customerLng: null,
         manualLink: manualLink,
-        allowProceed: true,
-        onProceed: () {
-          if (isStart) {
-            // FIX: bypass the server-side location gate because the manual
-            // link was verified above — the server returned no_location only
-            // because it could not parse coordinates, not because the link
-            // is absent.
-            final odoo = context.read<OdooCubit>();
-            if (odoo.service != null) {
-              odoo.service!.startTaskBypassed(_taskId).then((ok) {
-                if (ok && mounted) setState(() => _startingVisit = false);
-              });
-            }
-          } else {
-            _completeMaintenance(bypassLocationCheck: true);
-          }
-        },
       );
       return;
     }
@@ -1395,24 +1376,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
           debugPrint('[Complete] markTaskDone attempt $i: success=$success');
         } catch (e) {
           debugPrint('[Complete] markTaskDone error: $e');
-          // no_location from server: retry once with bypass flag to avoid loop.
+          // no_location from server: enforce location requirement.
           if (e.toString().contains('no_location:')) {
-            if (!bypassLocationCheck) {
-              try {
-                success = await odoo.service!.markTaskDone(
-                  _taskId,
-                  elapsedHours: elapsedHours,
-                  description: 'Maintenance visit - ${widget.maintenanceId}',
-                  worksheetModel:    _wsModel,
-                  worksheetValues:   _wsValues,
-                  worksheetRecordId: _wsRecordId,
-                  bypassLocationCheck: true,
-                  userLat: userLat,
-                  userLng: userLng,
-                );
-              } catch (_) {}
-              if (success) break;
-            }
             if (mounted) Navigator.pop(context);
             await _handleNoLocationFromServer(isStart: false);
             return;
