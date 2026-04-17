@@ -325,8 +325,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       return;
     }
 
-    if (_ts.isStarted(_taskId) && !_ts.isPaused(_taskId)) return;
-    setState(() => _startingVisit = true);
+    // FIX: removed duplicate guard+setState. The second guard returned early
+    // without resetting _startingVisit=false, permanently freezing the Start button.
     if (_ts.isStarted(_taskId) && !_ts.isPaused(_taskId)) return;
     setState(() => _startingVisit = true);
 
@@ -1159,11 +1159,15 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       if (odoo.service == null) return null;
 
       // 1. Task-level fields
+      // FIX: fs_task_type_id is a custom field — portal users get an access
+      // denied when trying to read it via ORM (groups=False means no portal
+      // access at the record level). We drop it from the ORM read and fall
+      // back to the value already present in widget.task (set at login via
+      // the /fsm/my_tasks sudo route which does have access).
       final results = await odoo.service!.searchRead(
         model: 'project.task',
         domain: [['id', '=', _taskId]],
-        fields: ['id', 'name', 'partner_id', 'stage_id',
-                 'fs_task_type_id', 'description'],
+        fields: ['id', 'name', 'partner_id', 'stage_id', 'description'],
         limit: 1,
       );
       if (results.isEmpty) return null;
@@ -1188,14 +1192,22 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       try {
         final loc = await odoo.service!.fetchTaskLocation(_taskId);
         if (loc != null) {
-          task['partner_latitude']  = loc['partner_latitude'];
-          task['partner_longitude'] = loc['partner_longitude'];
+          // FIX: apply the same "only overwrite when truthy" protection to
+          // lat/lng that was already applied to google_map_link_manual.
+          // Previously, blindly doing `task['partner_latitude'] = loc[...]`
+          // would replace a valid cached coordinate with `false` whenever
+          // the server returned false (e.g. one coord is zero, or the
+          // endpoint returned false due to the old has_coords AND gate).
+          // Now we only update when the endpoint gave us a real value.
+          final _freshLat = loc['partner_latitude'];
+          final _freshLng = loc['partner_longitude'];
+          if (_freshLat != null && _freshLat != false) {
+            task['partner_latitude'] = _freshLat;
+          }
+          if (_freshLng != null && _freshLng != false) {
+            task['partner_longitude'] = _freshLng;
+          }
           task['google_map_link']   = loc['google_map_link'];
-          // FIX: only overwrite google_map_link_manual when the server
-          // actually returned a real non-empty value.  Blindly setting
-          // it to null erases a valid link already seeded from widget.task
-          // or the partner cache, causing the blocking "No Customer
-          // Location" dialog even when the partner HAS a manual link.
           final _freshManual = loc['google_map_link_manual'];
           debugPrint('[LOC-DEBUG] _fetchFreshTaskData fetchTaskLocation raw: '
               'manual=$_freshManual lat=${loc["partner_latitude"]} lng=${loc["partner_longitude"]}');
@@ -1383,20 +1395,12 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
             return;
           }
 
-          // Task already completed — just show a message and exit
+          // Task already completed — treat as success so local state is
+          // cleaned up properly (timer stopped, task marked done locally).
+          // FIX: previously this returned early, skipping _ts.stopTimer etc.
           if (e.toString().contains('already_completed:')) {
-            if (mounted) {
-              Navigator.pop(context);
-              setState(() => _justCompleted = true);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('This task is already completed.',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
-                backgroundColor: Colors.orange.shade700,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ));
-            }
-            return;
+            success = true;
+            break;
           }
 
           // Outside geofence — show distance warning

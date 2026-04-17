@@ -15,7 +15,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _urlCtrl        = TextEditingController(text: 'https://odooprosys-alqased-main-27173048.dev.odoo.com');
+  final _urlCtrl        = TextEditingController(text: 'http://192.168.1.4:8084');
+  final _dbCtrl         = TextEditingController(text: 'alqased');
   final _emailCtrl      = TextEditingController();
   final _passCtrl       = TextEditingController();
 
@@ -27,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _urlCtrl.dispose();
+    _dbCtrl.dispose();
     _emailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
@@ -54,7 +56,9 @@ class _LoginScreenState extends State<LoginScreen> {
       final session = context.read<SessionCubit>();
 
       setState(() => _status = 'Connecting to server...');
-      await odoo.initAndAuth(serverUrl: url, login: email, password: pass);
+      await odoo.initAndAuth(
+          serverUrl: url, login: email, password: pass,
+          dbOverride: _dbCtrl.text.trim().isNotEmpty ? _dbCtrl.text.trim() : null);
       if (!mounted) return;
       setState(() => _status = 'Saving session...');
       await session.saveSession(
@@ -123,7 +127,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   _label('SERVER URL'),
                   const SizedBox(height: 8),
                   _field(ctrl: _urlCtrl, hint: 'https://yourcompany.odoo.com',
-                      icon: Icons.link_outlined, kb: TextInputType.url, readOnly: true),
+                      icon: Icons.link_outlined, kb: TextInputType.url, readOnly: false),
+                  const SizedBox(height: 18),
+
+                  // ── Database Name ──────────────────────────────────────
+                  _label('DATABASE NAME'),
+                  const SizedBox(height: 8),
+                  _field(ctrl: _dbCtrl, hint: 'e.g. alqased',
+                      icon: Icons.storage_outlined, kb: TextInputType.text),
                   const SizedBox(height: 18),
 
                   // ── Username ───────────────────────────────────────────

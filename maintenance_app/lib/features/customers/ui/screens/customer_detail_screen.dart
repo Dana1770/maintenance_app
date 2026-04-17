@@ -970,62 +970,63 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       if (fulls.isNotEmpty) c = fulls.first;
     } catch (_) {}
 
-    final fallbackTask = widget.tasks.isNotEmpty ? widget.tasks.first : const <String, dynamic>{};
+    final fallbackTask =
+        widget.tasks.isNotEmpty ? widget.tasks.first : const <String, dynamic>{};
     var resolved = _resolveLocation(c, fallbackTask);
 
-    if (!resolved.hasAnyLocation && odoo?.service != null) {
+    // ── Always fetch fresh location data from server so we get the latest
+    //    partner_latitude / partner_longitude / google_map_link_manual ───────
+    if (odoo?.service != null) {
       try {
-        final taskId = (widget.tasks.isNotEmpty ? widget.tasks.first['id'] : null) as int?;
+        final taskId =
+            (widget.tasks.isNotEmpty ? widget.tasks.first['id'] : null) as int?;
         if (taskId != null) {
           final taskLocData = await odoo!.service!.fetchTaskLocation(taskId);
           if (taskLocData != null) {
             final merged = Map<String, dynamic>.from(c);
             void _m(String k) {
               final v = taskLocData[k];
-              if (v != null && v != false && v.toString().trim().isNotEmpty && v.toString() != 'false') merged[k] = v;
+              if (v != null &&
+                  v != false &&
+                  v.toString().trim().isNotEmpty &&
+                  v.toString() != 'false') {
+                merged[k] = v;
+              }
             }
-            _m('google_map_link_manual'); _m('google_map_link');
-            _m('partner_latitude'); _m('partner_longitude');
+            // Only pull the fields we care about – skip google_map_link
+            // (auto-generated) so we don't accidentally prefer it over
+            // the manually-entered link.
+            _m('google_map_link_manual');
+            _m('partner_latitude');
+            _m('partner_longitude');
             c = merged;
             resolved = _resolveLocation(c, fallbackTask);
-            // Force hasAnyLocation if server says so
-            if (taskLocData['has_location'] == true && !resolved.hasAnyLocation) {
-              resolved = (manualLink: resolved.manualLink, googleLink: resolved.googleLink,
-                          custLat: resolved.custLat, custLng: resolved.custLng, hasAnyLocation: true);
-            }
           }
         }
       } catch (_) {}
     }
 
-    // ORM fallback
-    if (!resolved.hasAnyLocation && odoo?.service != null) {
+    // ── Priority 1 : real GPS coordinates → open in Google Maps ────────────
+    if (resolved.custLat != null && resolved.custLng != null) {
+      final url =
+          'https://www.google.com/maps/search/?api=1&query=${resolved.custLat},${resolved.custLng}';
       try {
-        final pid = c['id'] as int?;
-        if (pid != null) {
-          final fresh = await odoo!.service!.fetchPartnersByIds([pid]);
-          if (fresh.isNotEmpty) {
-            c        = fresh.first;
-            resolved = _resolveLocation(c, fallbackTask);
-          }
-        }
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } catch (_) {}
+      return;
     }
 
-    // If still no location, the endpoint is not deployed — open Google Maps
-    // search for the customer name rather than blocking with an error dialog.
-    final navUrl = (resolved.custLat != null && resolved.custLng != null)
-        ? 'https://www.google.com/maps/dir/?api=1&destination=${resolved.custLat},${resolved.custLng}'
-        : (resolved.manualLink.isNotEmpty ? resolved.manualLink
-           : (resolved.googleLink.isNotEmpty ? resolved.googleLink : ''));
-
-    if (navUrl.isNotEmpty) {
+    // ── Priority 2 : manually entered map link ──────────────────────────────
+    if (resolved.manualLink.isNotEmpty) {
       try {
-        await launchUrl(Uri.parse(navUrl), mode: LaunchMode.externalApplication);
+        await launchUrl(Uri.parse(resolved.manualLink),
+            mode: LaunchMode.externalApplication);
       } catch (_) {}
-    } else {
-      _showNoLocationDialog();
+      return;
     }
+
+    // ── No location available at all → inform the user ─────────────────────
+    _showNoLocationDialog();
   }
 
   Future<void> _launch(String url) async {

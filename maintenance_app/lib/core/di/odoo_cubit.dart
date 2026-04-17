@@ -285,10 +285,11 @@ class OdooCubit extends Cubit<OdooState> {
     required String serverUrl,
     required String login,
     required String password,
+    String? dbOverride,
   }) async {
     final svc = OdooService(serverUrl);
     await svc.detectDatabase();
-    final uid    = await svc.authenticate(login: login, password: password);
+    final uid    = await svc.authenticate(login: login, password: password, dbOverride: dbOverride);
     _service     = svc;
     _loggedUid   = uid;
     _startAutoRefresh();

@@ -23,7 +23,7 @@ class OdooService {
     if (!raw.startsWith('http://') && !raw.startsWith('https://')) raw = 'https://$raw';
     final uri = Uri.tryParse(raw);
     if (uri == null || uri.host.isEmpty) return raw;
-    return '${uri.scheme}://${uri.host}';
+    return '${uri.scheme}://${uri.host}${uri.hasPort ? ":${uri.port}" : ""}';
   }
 
   static Never _throwNetworkError(dynamic e, String url) {
@@ -69,6 +69,22 @@ class OdooService {
       if (host.contains('.dev.odoo.com') || host.contains('.odoo.com')) {
         final subdomain = host.split('.').first;
         _detectedDb = subdomain;
+        return _detectedDb!;
+      }
+    } catch (_) {}
+
+    // ── Fallback: for local/IP servers derive db from URL host or use known default ──
+    try {
+      final uri = Uri.parse(baseUrl);
+      final host = uri.host;
+      // Try fetching the database selector page to extract the db name
+      final selectorRes = await http.get(
+        Uri.parse('$baseUrl/web/database/selector'),
+      ).timeout(const Duration(seconds: 10));
+      final selectorBody = selectorRes.body;
+      final match = RegExp(r'<option[^>]*value="([^"]+)"').firstMatch(selectorBody);
+      if (match != null) {
+        _detectedDb = match.group(1)!;
         return _detectedDb!;
       }
     } catch (_) {}
@@ -591,7 +607,7 @@ class OdooService {
           'params': {'partner_ids': ids},
         }),
       ).timeout(const Duration(seconds: 15));
-      
+
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
         if (decoded['result'] != null && decoded['result']['partners'] != null) {
@@ -1202,6 +1218,12 @@ class OdooService {
   }
 
   Future<bool> _startTaskInternal(int taskId) async {
+    // FIX: Portal users cannot write timer_start directly (security restriction).
+    // We only call action_timer_start via ORM and trust it succeeded.
+    // The direct write({'timer_start': now}) is dropped because:
+    //   1. It fails for portal users → "cannot write on tasks: timer_start"
+    //   2. action_timer_start already sets timer_start on the server side
+    bool methodOk = false;
     for (final method in ['action_timer_start', 'action_assign_hours']) {
       try {
         await callMethod(
@@ -1211,19 +1233,11 @@ class OdooService {
               : {'active_id': taskId}},
         );
         print('[OdooService] startTask ORM: $method OK');
+        methodOk = true;
         break;
       } catch (e) { print('[OdooService] startTask ORM $method: $e'); }
     }
-    try {
-      final now = _utcNow();
-      await callMethod(model: 'project.task', method: 'write',
-          args: [[taskId], {'timer_start': now}]);
-      print('[OdooService] startTask: wrote timer_start=$now');
-      return true;
-    } catch (e) {
-      print('[OdooService] startTask write error: $e');
-      return false;
-    }
+    return methodOk;
   }
 
   // ── RESUME TASK (Portal-Safe) ─────────────────────────────────────────────
@@ -1257,6 +1271,9 @@ class OdooService {
   }
 
   Future<bool> _resumeTaskInternal(int taskId) async {
+    // FIX: Portal users cannot write timer_start directly (security restriction).
+    // Trust action_timer_resume / action_timer_start to set it server-side.
+    bool methodOk = false;
     for (final method in ['action_timer_resume', 'action_timer_start']) {
       try {
         await callMethod(
@@ -1266,19 +1283,11 @@ class OdooService {
               : {'active_id': taskId}},
         );
         print('[OdooService] resumeTask ORM: $method OK');
+        methodOk = true;
         break;
       } catch (e) { print('[OdooService] resumeTask ORM $method: $e'); }
     }
-    try {
-      final now = _utcNow();
-      await callMethod(model: 'project.task', method: 'write',
-          args: [[taskId], {'timer_start': now}]);
-      print('[OdooService] resumeTask: wrote timer_start=$now');
-      return true;
-    } catch (e) {
-      print('[OdooService] resumeTask write error: $e');
-      return false;
-    }
+    return methodOk;
   }
 
   // ── PAUSE TASK (Portal-Safe) ──────────────────────────────────────────────
